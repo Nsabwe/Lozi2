@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Topher</title>
+<style>
+/* --- BODY & LAYOUT --- */
+body {
+  margin: 0;
+  font-family: 'Segoe UI', sans-serif;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)),
+              url('https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1600&q=80') no-repeat center center fixed;
+  background-size: cover;
+  color: #fff;
+}
+#stories-bar {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  background: rgba(255,255,255,0.08);
+  padding: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.15);
+}
+.story {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  margin-right: 10px;
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  border: 2px solid gold;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.story span {
+  position: absolute;
+  bottom: -18px;
+  left: 0;
+  right: 0;
+  font-size: 12px;
+  text-align: center;
+  color: gold;
+}
+#add-story {
+  background: rgba(255,255,255,0.1);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 30px;
+  font-weight: bold;
+  color: gold;
+  border: 2px dashed gold;
+}
+
+/* --- MAIN LAYOUT --- */
+#main { display: flex; flex: 1; }
+#users {
+  width: 250px;
+  background: rgba(255,255,255,0.08);
+  border-right: 1px solid rgba(255,255,255,0.15);
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+}
+#users h1 { color: gold; }
+#users-list { list-style: none; padding: 0; width: 100%; }
+.user-item { display: flex; align-items: center; margin-bottom: 8px; cursor: pointer; padding: 5px; border-radius: 6px; }
+.user-item:hover { background: rgba(255,215,0,0.15); }
+.user-avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #000; font-weight: bold; margin-right: 10px; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; margin-left: auto; border: 1px solid #000; }
+.status-online { background: #90ee90; }
+.status-offline { background: gray; }
+.status-typing { background: #ffd700; animation: blink 1s infinite; }
+@keyframes blink { 0%,50%,100%{opacity:1;}25%,75%{opacity:0;} }
+
+#chat { flex: 1; display: flex; flex-direction: column; background: rgba(255,255,255,0.05); }
+#chat-status { text-align: center; color: #ccc; margin: 5px 0; }
+#messages { flex: 1; padding: 20px; overflow-y: auto; font-size: 15px; display: flex; flex-direction: column; }
+.message { margin-bottom: 10px; padding: 8px 12px; border-radius: 8px; max-width: 80%; display: flex; align-items: center; }
+.message-avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #000; font-weight: bold; margin-right: 10px; }
+.message-content { display: flex; flex-direction: column; }
+.username { font-weight: bold; }
+.timestamp { font-size: 11px; color: #ccc; margin-left: 5px; }
+.private-label { font-size: 12px; color: #ffd700; margin-left: 5px; font-weight: bold; }
+.message.private { background: rgba(255,215,0,0.2); border: 1px solid gold; }
+.message.own { background: rgba(30,144,255,0.2); border: 1px solid #1E90FF; align-self: flex-end; }
+
+#message-form { display: flex; padding: 10px; border-top: 1px solid rgba(255,255,255,0.2); }
+#message-input { flex: 1; padding: 10px; border: none; border-radius: 6px; background: rgba(255,255,255,0.1); color: #fff; outline: none; }
+#message-submit { padding: 10px 20px; margin-left: 10px; border: none; border-radius: 6px; background: linear-gradient(135deg, #ffd700, #ffb700); color: #000; font-weight: bold; cursor: pointer; }
+.typing-indicator { font-size: 13px; color: #ccc; font-style: italic; margin-bottom: 5px; }  
+</style>
+</head>
+<body>
+
+<!-- STORIES -->
+<div id="stories-bar">
+  <div id="add-story" class="story">+</div>
+</div>
+
+<!-- MAIN LAYOUT -->
+<div id="main">
+  <div id="users">
+    <h1>CLChat 💫</h1>
+    <h3>Online Users</h3>
+    <input type="text" id="user-search" placeholder="Search users..." autocomplete="off">
+    <ul id="users-list"></ul>
+  </div>
+
+  <div id="chat">
+    <div id="chat-status">Public chat</div>
+    <div id="messages"></div>
+    <div id="typing"></div>
+    <form id="message-form">
+      <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+      <button type="submit" id="message-submit">Send</button>
+    </form>
+  </div>
+</div>
+
+<!-- SOCKET.IO -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+const BACKEND_URL = 'https://chat-1dn7.onrender.com';
+const socket = io(BACKEND_URL);
+
+let username = prompt("Enter your username:") || "Anonymous";
+let privateReceiver = null;
+let stories = JSON.parse(localStorage.getItem("stories") || "{}");
+
+const usersListEl = document.getElementById("users-list");
+const messagesEl = document.getElementById("messages");
+const messageForm = document.getElementById("message-form");
+const messageInput = document.getElementById("message-input");
+const typingEl = document.getElementById("typing");
+const chatStatus = document.getElementById("chat-status");
+const addStoryBtn = document.getElementById("add-story");
+
+const colors = ['#FF4500','#FF8C00','#FFD700','#32CD32','#1E90FF','#8A2BE2','#FF69B4','#00CED1'];
+function getColor(name){ let hash=0; for(let i=0;i<name.length;i++){ hash=name.charCodeAt(i)+((hash<<5)-hash);} return colors[Math.abs(hash)%colors.length]; }
+function getInitials(name){ return name.split(' ').map(n=>n[0].toUpperCase()).join('').slice(0,2); }
+
+let onlineUsers = {};
+let typingUsers = new Set();
+
+// --- SOCKET EVENTS ---
+socket.emit("user joined", username);
+
+socket.on("users update", list => {
+  onlineUsers={}; list.forEach(u=>onlineUsers[u]=true);
+  updateUsersList(list);
+});
+socket.on("chat history", msgs => msgs.forEach(addMessage));
+socket.on("receive message", addMessage);
+socket.on("typing", data => {
+  if (data.sender !== username) {
+    typingUsers.add(data.sender);
+    updateTyping();
+    setTimeout(() => { typingUsers.delete(data.sender); updateTyping(); }, 2000);
+  }
+});
+
+fetch(`${BACKEND_URL}/api/messages`)
+  .then(res => res.json())
+  .then(messages => messages.forEach(addMessage))
+  .catch(err => console.error(err));
+
+// --- CHAT HANDLERS ---
+messageForm.addEventListener("submit", e => {
+  e.preventDefault();
+  const text = messageInput.value.trim();
+  if (!text) return;
+  const msg = { sender: username, content: text, receiver: privateReceiver };
+  socket.emit("send message", msg);
+  addMessage(msg);
+  fetch(`${BACKEND_URL}/api/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(msg)
+  });
+  messageInput.value = "";
+});
+messageInput.addEventListener("input", () => socket.emit("typing", { sender: username, receiver: privateReceiver }));
+
+function updateUsersList(list){
+  usersListEl.innerHTML = "";
+  list.forEach(user => {
+    const li = document.createElement("li");
+    li.className = "user-item";
+    const avatar = document.createElement("div");
+    avatar.className = "user-avatar";
+    avatar.style.backgroundColor = getColor(user);
+    avatar.textContent = getInitials(user);
+    const status = document.createElement("div");
+    status.className = "status-dot " + (typingUsers.has(user) ? "status-typing" : (onlineUsers[user] ? "status-online" : "status-offline"));
+    li.appendChild(avatar);
+    li.appendChild(document.createTextNode(user));
+    li.appendChild(status);
+    if (user !== username) li.onclick = () => { privateReceiver = user; chatStatus.textContent = "Private chat with " + user; };
+    else li.onclick = () => { privateReceiver = null; chatStatus.textContent = "Public chat"; };
+    usersListEl.appendChild(li);
+  });
+}
+function addMessage(msg) {
+  const div = document.createElement("div");
+  div.className = "message";
+  const isOwn = msg.sender === username;
+  const isPrivate = !!msg.receiver;
+  if (isOwn) div.classList.add("own");
+  if (isPrivate) div.classList.add("private");
+  const avatar = document.createElement("div");
+  avatar.className = "message-avatar";
+  avatar.style.backgroundColor = getColor(msg.sender);
+  avatar.textContent = getInitials(msg.sender);
+  const content = document.createElement("div");
+  content.className = "message-content";
+  const header = document.createElement("div");
+  header.innerHTML = `
+    <span class="username">${msg.sender}</span>
+    ${isPrivate ? '<span class="private-label">(Private)</span>' : ''}
+    <span class="timestamp">${new Date(msg.timestamp || Date.now()).toLocaleTimeString()}</span>`;
+  const body = document.createElement("div");
+  body.textContent = msg.text || msg.content;
+  content.appendChild(header);
+  content.appendChild(body);
+  div.appendChild(avatar);
+  div.appendChild(content);
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+function updateTyping() {
+  typingEl.innerHTML = typingUsers.size ? Array.from(typingUsers).join(", ") + " typing..." : "";
+}
+
+// --- STORIES HANDLERS ---
+addStoryBtn.onclick = () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = ev.target.result;
+      const text = prompt("Write something for your story (optional):") || "";
+      if (!stories[username]) stories[username] = [];
+      stories[username].push({ img, text, time: Date.now(), likes: [], comments: [] });
+      localStorage.setItem("stories", JSON.stringify(stories));
+      socket.emit("story update", stories);
+      renderStories();
+      setTimeout(() => deleteStory(username, img), 24*60*60*1000);
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+};
+
+function deleteStory(user, img) {
+  if (!stories[user]) return;
+  stories[user] = stories[user].filter(s => s.img !== img);
+  localStorage.setItem("stories", JSON.stringify(stories));
+  socket.emit("story update", stories);
+  renderStories();
+}
+
+function renderStories() {
+  const bar = document.getElementById("stories-bar");
+  bar.innerHTML = '<div id="add-story" class="story">+</div>';
+  document.getElementById("add-story").onclick = addStoryBtn.onclick;
+  for (let user in stories) {
+    if (!stories[user].length) continue;
+    const latest = stories[user][stories[user].length-1];
+    const div = document.createElement("div");
+    div.className = "story";
+    div.style.backgroundImage = `url(${latest.img})`;
+    const span = document.createElement("span");
+    span.textContent = user===username ? "You" : user;
+    div.appendChild(span);
+    div.onclick = () => openStoryViewer(user);
+    bar.appendChild(div);
+  }
+}
+
+function openStoryViewer(user) {
+  const viewer = document.createElement("div");
+  viewer.style = `position:fixed; top:0; left:0; right:0; bottom:0;
+    background:rgba(0,0,0,0.95); display:flex; align-items:center; justify-content:center;
+    flex-direction:column; color:white; z-index:9999;`;
+  let index=0;
+  const list = stories[user];
+
+  const img = document.createElement("img");
+  img.style.maxHeight = "70%";
+  img.style.borderRadius = "8px";
+  const text = document.createElement("div"); text.style.marginTop="15px";
+
+  const likesDiv = document.createElement("div"); likesDiv.style.marginTop="5px";
+  const commentsDiv = document.createElement("div"); 
+  commentsDiv.style.maxHeight="150px"; commentsDiv.style.overflowY="auto"; 
+  commentsDiv.style.width="300px"; commentsDiv.style.marginTop="5px";
+  commentsDiv.style.borderTop="1px solid #ccc"; commentsDiv.style.borderBottom="1px solid #ccc"; commentsDiv.style.padding="5px";
+
+  const commentInput = document.createElement("input");
+  commentInput.type="text"; commentInput.placeholder="Add a comment...";
+  commentInput.style.width="300px"; commentInput.style.marginTop="5px";
+
+  const nextBtn=document.createElement("button"); nextBtn.textContent="Next"; nextBtn.onclick=()=>{index=(index+1)%list.length; updateStory();}
+  const prevBtn=document.createElement("button"); prevBtn.textContent="Prev"; prevBtn.onclick=()=>{index=(index-1+list.length)%list.length; updateStory();}
+  const closeBtn=document.createElement("button"); closeBtn.textContent="Close"; closeBtn.onclick=()=>document.body.removeChild(viewer);
+  const likeBtn=document.createElement("button"); likeBtn.textContent="Like"; likeBtn.onclick=()=>{
+    const story = list[index];
+    if(!story.likes.includes(username)) story.likes.push(username);
+    else story.likes = story.likes.filter(u=>u!==username);
+    localStorage.setItem("stories", JSON.stringify(stories));
+    socket.emit("story update", stories);
+    updateStory();
+  };
+  [prevBtn,nextBtn,closeBtn,likeBtn].forEach(b=>{b.style.margin="5px"; b.style.padding="6px 12px";});
+
+  viewer.appendChild(img); viewer.appendChild(text); viewer.appendChild(likesDiv); viewer.appendChild(commentsDiv); viewer.appendChild(commentInput);
+  const btnDiv=document.createElement("div"); btnDiv.appendChild(prevBtn); btnDiv.appendChild(nextBtn); btnDiv.appendChild(likeBtn); btnDiv.appendChild(closeBtn);
+  viewer.appendChild(btnDiv); document.body.appendChild(viewer);
+
+  commentInput.addEventListener("keypress", e=>{
+    if(e.key==="Enter"){
+      const val=commentInput.value.trim(); if(!val) return;
+      list[index].comments.push({user:username,text:val}); commentInput.value="";
+      localStorage.setItem("stories", JSON.stringify(stories)); socket.emit("story update", stories); updateStory();
+    }
+  });
+
+  function updateStory(){
+    const story=list[index];
+    img.src=story.img; text.textContent=story.text||"";
+    likesDiv.textContent=`❤️ Likes: ${story.likes.length}`;
+    commentsDiv.innerHTML="";
+    story.comments.forEach(c=>{const d=document.createElement("div"); d.textContent=`${c.user}: ${c.text}`; commentsDiv.appendChild(d);});
+    likeBtn.textContent=story.likes.includes(username)?"Unlike":"Like";
+  }
+
+  updateStory();
+}
+
+// Real-time story updates
+socket.on("story update", updatedStories => {
+  stories = updatedStories;
+  localStorage.setItem("stories", JSON.stringify(stories));
+  renderStories();
+});
+
+// Initialize
+renderStories();
+</script>
+</body>
+</html>
